@@ -4,11 +4,12 @@ on:
   workflow_dispatch:
 
   schedule:
+    # Tous les jours à 12:00 heure allemande
     - cron: "0 12 * * *"
       timezone: "Europe/Berlin"
 
-
 jobs:
+
   search:
 
     runs-on: ubuntu-latest
@@ -44,17 +45,21 @@ jobs:
 
       - name: Install Python dependencies
         run: |
+
           python -m pip install --upgrade pip
+
           pip install -r requirements.txt
 
 
       # ==========================================
-      # 4. Installer Chromium pour Playwright
+      # 4. Installer Chromium
       # ==========================================
 
       - name: Install Playwright Chromium
         run: |
+
           python -m playwright install chromium
+
           python -m playwright install-deps chromium
 
 
@@ -64,16 +69,39 @@ jobs:
 
       - name: Check project files
         run: |
-          echo "===== FICHIERS DU PROJET ====="
+
+          echo "=========================================="
+          echo "FICHIERS DU PROJET"
+          echo "=========================================="
+
           ls -la
 
-          echo "===== DATA.JSON ====="
+          echo ""
+          echo "=========================================="
+          echo "DATABASE AVANT SCRAPING"
+          echo "=========================================="
 
           if [ -f data.json ]; then
-            cat data.json
+
+            python - <<'PY'
+import json
+
+try:
+    with open("data.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    print(f"📚 Offres déjà enregistrées : {len(data)}")
+
+except Exception as e:
+    print("⚠️ Erreur lecture data.json :", e)
+PY
+
           else
-            echo "data.json n'existe pas"
+
+            echo "data.json n'existe pas."
+
             echo "[]" > data.json
+
           fi
 
 
@@ -82,31 +110,58 @@ jobs:
       # ==========================================
 
       - name: Run Ausbildung Bot
+
         env:
+
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
 
         run: |
+
+          echo "=========================================="
+          echo "🇩🇪 DEMARRAGE AUSBILDUNG VERKÄUFER BOT"
+          echo "=========================================="
+
           python scraper.py
 
 
       # ==========================================
-      # 7. Afficher la base après le scraping
+      # 7. Vérifier la base après scraping
       # ==========================================
 
       - name: Check database after scraping
         run: |
-          echo "===== DATA.JSON APRÈS LE SCRAPING ====="
+
+          echo "=========================================="
+          echo "DATABASE APRÈS SCRAPING"
+          echo "=========================================="
 
           if [ -f data.json ]; then
-            cat data.json
+
+            python - <<'PY'
+import json
+
+try:
+    with open("data.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    print(f"📚 TOTAL OFFRES DANS LA BASE : {len(data)}")
+
+except Exception as e:
+
+    print("⚠️ Erreur lecture data.json :", e)
+PY
+
           else
-            echo "data.json introuvable"
+
+            echo "❌ data.json introuvable"
+
           fi
 
 
       # ==========================================
-      # 8. Sauvegarder data.json dans GitHub
+      # 8. Sauvegarder la base GitHub
       # ==========================================
 
       - name: Save database
@@ -120,7 +175,7 @@ jobs:
 
           if git diff --cached --quiet; then
 
-            echo "Aucune modification de data.json."
+            echo "ℹ️ Aucune modification de data.json."
 
           else
 
