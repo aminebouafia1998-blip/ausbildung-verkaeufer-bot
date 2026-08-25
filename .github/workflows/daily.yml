@@ -1,67 +1,131 @@
 name: Ausbildung Verkäufer Daily Bot
 
 on:
+  workflow_dispatch:
 
   schedule:
-
-    - cron: "0 13 * * *"
+    - cron: "0 12 * * *"
       timezone: "Europe/Berlin"
-
-  workflow_dispatch:
 
 
 jobs:
-
   search:
 
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     steps:
 
-      - name: Checkout
-        uses: actions/checkout@v4
+      # ==========================================
+      # 1. Télécharger le projet
+      # ==========================================
 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+
+      # ==========================================
+      # 2. Installer Python
+      # ==========================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
-
         with:
           python-version: "3.12"
 
 
-      - name: Install dependencies
+      # ==========================================
+      # 3. Installer les dépendances
+      # ==========================================
+
+      - name: Install Python dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
 
-      - name: Install Chromium
-        run: |
-          playwright install chromium
-          playwright install-deps chromium
+      # ==========================================
+      # 4. Installer Chromium pour Playwright
+      # ==========================================
 
+      - name: Install Playwright Chromium
+        run: |
+          python -m playwright install chromium
+          python -m playwright install-deps chromium
+
+
+      # ==========================================
+      # 5. Vérifier les fichiers
+      # ==========================================
+
+      - name: Check project files
+        run: |
+          echo "===== FICHIERS DU PROJET ====="
+          ls -la
+
+          echo "===== DATA.JSON ====="
+
+          if [ -f data.json ]; then
+            cat data.json
+          else
+            echo "data.json n'existe pas"
+            echo "[]" > data.json
+          fi
+
+
+      # ==========================================
+      # 6. Lancer le bot
+      # ==========================================
 
       - name: Run Ausbildung Bot
         env:
-
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
 
         run: |
-
           python scraper.py
 
 
-                  - name: Save database
+      # ==========================================
+      # 7. Afficher la base après le scraping
+      # ==========================================
+
+      - name: Check database after scraping
         run: |
+          echo "===== DATA.JSON APRÈS LE SCRAPING ====="
+
+          if [ -f data.json ]; then
+            cat data.json
+          else
+            echo "data.json introuvable"
+          fi
+
+
+      # ==========================================
+      # 8. Sauvegarder data.json dans GitHub
+      # ==========================================
+
+      - name: Save database
+        run: |
+
           git config user.name "Ausbildung Bot"
+
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add data.json
 
           if git diff --cached --quiet; then
-            echo "Aucune modification de data.json"
+
+            echo "Aucune modification de data.json."
+
           else
+
             git commit -m "Update Ausbildung database"
+
             git push
+
           fi
