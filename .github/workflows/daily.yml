@@ -4,14 +4,10 @@ on:
   workflow_dispatch:
 
   schedule:
-    # Tous les jours à 12:00 heure allemande
     - cron: "0 12 * * *"
-      timezone: "Europe/Berlin"
 
 jobs:
-
   search:
-
     runs-on: ubuntu-latest
 
     permissions:
@@ -19,168 +15,67 @@ jobs:
 
     steps:
 
-      # ==========================================
-      # 1. Télécharger le projet
-      # ==========================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-
-      # ==========================================
-      # 2. Installer Python
-      # ==========================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-
-      # ==========================================
-      # 3. Installer les dépendances
-      # ==========================================
-
       - name: Install Python dependencies
         run: |
-
           python -m pip install --upgrade pip
-
           pip install -r requirements.txt
-
-
-      # ==========================================
-      # 4. Installer Chromium
-      # ==========================================
 
       - name: Install Playwright Chromium
         run: |
-
           python -m playwright install chromium
-
           python -m playwright install-deps chromium
-
-
-      # ==========================================
-      # 5. Vérifier les fichiers
-      # ==========================================
 
       - name: Check project files
         run: |
-
-          echo "=========================================="
-          echo "FICHIERS DU PROJET"
-          echo "=========================================="
-
+          echo "===== FICHIERS DU PROJET ====="
           ls -la
 
-          echo ""
-          echo "=========================================="
-          echo "DATABASE AVANT SCRAPING"
-          echo "=========================================="
+          echo "===== DATA.JSON ====="
 
           if [ -f data.json ]; then
-
-            python - <<'PY'
-import json
-
-try:
-    with open("data.json", "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    print(f"📚 Offres déjà enregistrées : {len(data)}")
-
-except Exception as e:
-    print("⚠️ Erreur lecture data.json :", e)
-PY
-
+            cat data.json
           else
-
-            echo "data.json n'existe pas."
-
+            echo "data.json n'existe pas"
             echo "[]" > data.json
-
           fi
 
-
-      # ==========================================
-      # 6. Lancer le bot
-      # ==========================================
-
       - name: Run Ausbildung Bot
-
         env:
-
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-
         run: |
-
-          echo "=========================================="
-          echo "🇩🇪 DEMARRAGE AUSBILDUNG VERKÄUFER BOT"
-          echo "=========================================="
-
           python scraper.py
-
-
-      # ==========================================
-      # 7. Vérifier la base après scraping
-      # ==========================================
 
       - name: Check database after scraping
         run: |
-
-          echo "=========================================="
-          echo "DATABASE APRÈS SCRAPING"
-          echo "=========================================="
+          echo "===== DATA.JSON APRÈS LE SCRAPING ====="
 
           if [ -f data.json ]; then
-
-            python - <<'PY'
-import json
-
-try:
-    with open("data.json", "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    print(f"📚 TOTAL OFFRES DANS LA BASE : {len(data)}")
-
-except Exception as e:
-
-    print("⚠️ Erreur lecture data.json :", e)
-PY
-
+            cat data.json
           else
-
-            echo "❌ data.json introuvable"
-
+            echo "data.json introuvable"
           fi
-
-
-      # ==========================================
-      # 8. Sauvegarder la base GitHub
-      # ==========================================
 
       - name: Save database
         run: |
-
           git config user.name "Ausbildung Bot"
-
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add data.json
 
           if git diff --cached --quiet; then
-
-            echo "ℹ️ Aucune modification de data.json."
-
+            echo "Aucune modification de data.json."
           else
-
             git commit -m "Update Ausbildung database"
-
             git push
-
           fi
