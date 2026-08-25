@@ -19,7 +19,7 @@ ARBEITSAGENTUR_URL = (
     "suche?suchbereich=ausbildung&was=Verk%C3%A4ufer%2Fin"
 )
 
-EMAIL_TO = "zimcotter@gmail.com"
+EMAIL_TO = "amine.bouafia1998@gmail.com"
 
 EMAIL_FROM = os.environ["EMAIL_FROM"]
 EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
