@@ -32,6 +32,10 @@ EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
 
 DATABASE_FILE = "data.json"
 
+# Temps maximum d'attente pour une Sicherheitsabfrage
+# 300000 ms = 5 minutes
+CAPTCHA_TIMEOUT = 300000
+
 
 # ============================================================
 # DATABASE
@@ -187,7 +191,7 @@ def extract_phone(text):
 
 
 # ============================================================
-# DETECTION CAPTCHA / SICHERHEITSABFRAGE
+# DETECTION SICHERHEITSABFRAGE
 # ============================================================
 
 def captcha_detected(text):
@@ -226,6 +230,93 @@ def captcha_detected(text):
 
 
 # ============================================================
+# ATTENDRE LA FIN DE LA SICHERHEITSABFRAGE
+# ============================================================
+
+async def wait_for_security_check(page):
+
+    try:
+
+        text = await page.locator(
+            "body"
+        ).inner_text()
+
+    except Exception:
+
+        return False
+
+    if not captcha_detected(text):
+
+        return True
+
+    print()
+    print(
+        "🔐 SICHERHEITSABFRAGE DÉTECTÉE"
+    )
+
+    print(
+        "⏳ L'offre n'est PAS ignorée."
+    )
+
+    print(
+        "⏳ Attente de la fin de la "
+        "Sicherheitsabfrage..."
+    )
+
+    print(
+        "⏳ Temps maximum : 5 minutes."
+    )
+
+    try:
+
+        await page.wait_for_function(
+            """
+            () => {
+                const text =
+                    document.body.innerText.toLowerCase();
+
+                return !(
+                    text.includes("sicherheitsabfrage") ||
+                    text.includes("sicherheitsüberprüfung") ||
+                    text.includes("captcha") ||
+                    text.includes("verify you are human") ||
+                    text.includes("ich bin kein roboter") ||
+                    text.includes("dargestellte zeichen") ||
+                    text.includes("anderen bild laden") ||
+                    text.includes("audio version abspielen")
+                );
+            }
+            """,
+            timeout=CAPTCHA_TIMEOUT
+        )
+
+        print()
+        print(
+            "✅ Sicherheitsabfrage terminée."
+        )
+
+        await page.wait_for_timeout(
+            3000
+        )
+
+        return True
+
+    except Exception:
+
+        print()
+        print(
+            "⚠️ La Sicherheitsabfrage est toujours "
+            "présente après 5 minutes."
+        )
+
+        print(
+            "⏭️ Cette offre ne sera pas sauvegardée."
+        )
+
+        return False
+
+
+# ============================================================
 # INFORMATIONEN ZUR BEWERBUNG
 # ============================================================
 
@@ -246,7 +337,6 @@ def extract_bewerbung_info(text):
 
     start_index = None
 
-    # Recherche de la section
     for i, line in enumerate(lines):
 
         normalized = (
@@ -269,12 +359,10 @@ def extract_bewerbung_info(text):
 
     information = []
 
-    # Extraction de la section
     for line in lines[start_index + 1:]:
 
         lower = line.lower()
 
-        # Nouvelle section
         if (
 
             lower.startswith("aufgaben")
@@ -293,13 +381,16 @@ def extract_bewerbung_info(text):
 
             or lower.startswith("stellenbeschreibung")
 
+            or lower.startswith("ausbildung")
+
+            or lower.startswith("tätigkeit")
+
         ):
 
             break
 
         information.append(line)
 
-        # Sécurité
         if len(information) >= 50:
             break
 
@@ -387,7 +478,9 @@ def extract_city(lines):
 async def open_jobs_page(page):
 
     print()
-    print("🌐 Ouverture de Arbeitsagentur...")
+    print(
+        "🌐 Ouverture de Arbeitsagentur..."
+    )
 
     await page.goto(
         ARBEITSAGENTUR_URL,
@@ -475,7 +568,7 @@ async def load_all_results(page):
 
 
 # ============================================================
-# RECUPERER LES OFFRES
+# RÉCUPÉRER LES OFFRES
 # ============================================================
 
 async def collect_jobs(page):
@@ -532,12 +625,10 @@ async def collect_jobs(page):
 
             title_lower = title.lower()
 
-            # Seulement Verkäufer / Verkäuferin
             if (
                 "verkäufer" not in title_lower
                 and "verkäuferin" not in title_lower
             ):
-
                 continue
 
             href = normalize_url(
@@ -554,8 +645,6 @@ async def collect_jobs(page):
                 href
             )
 
-            # IMPORTANT :
-            # fermeture correcte du dictionnaire avec })
             jobs.append({
                 "title": title,
                 "url": href,
@@ -606,6 +695,11 @@ async def scrape_job_details(
             job["title"]
         )
 
+        print(
+            "🔗",
+            job["url"]
+        )
+
         await page.goto(
             job["url"],
             wait_until="domcontentloaded",
@@ -616,26 +710,40 @@ async def scrape_job_details(
             4000
         )
 
-        # Récupérer le contenu
+        # ====================================================
+        # SICHERHEITSABFRAGE
+        # ====================================================
+
+        security_ok = await wait_for_security_check(
+            page
+        )
+
+        if not security_ok:
+
+            return None
+
+        # ====================================================
+        # RÉCUPÉRER LE CONTENU APRÈS LA SÉCURITÉ
+        # ====================================================
+
         text = await page.locator(
             "body"
         ).inner_text()
 
-        # ====================================================
-        # CAPTCHA
-        # ====================================================
-
+        # Si une sécurité apparaît de nouveau
+        # après le premier chargement
         if captcha_detected(text):
 
-            print(
-                "🔐 Sicherheitsabfrage / CAPTCHA détecté."
+            security_ok = await wait_for_security_check(
+                page
             )
 
-            print(
-                "🚫 Offre ignorée."
-            )
+            if not security_ok:
+                return None
 
-            return None
+            text = await page.locator(
+                "body"
+            ).inner_text()
 
         # ====================================================
         # LIGNES
@@ -655,10 +763,8 @@ async def scrape_job_details(
         # INFORMATIONEN ZUR BEWERBUNG
         # ====================================================
 
-        bewerbung_info = (
-            extract_bewerbung_info(
-                text
-            )
+        bewerbung_info = extract_bewerbung_info(
+            text
         )
 
         if not bewerbung_info:
@@ -674,11 +780,15 @@ async def scrape_job_details(
             bewerbung_info
         )
 
+        print()
+        print(
+            "📋 Informationen zur Bewerbung trouvées."
+        )
+
         # ====================================================
         # EMAIL
         #
-        # IMPORTANT :
-        # uniquement dans Informationen zur Bewerbung
+        # UNIQUEMENT dans Informationen zur Bewerbung
         # ====================================================
 
         email = extract_email(
@@ -688,19 +798,27 @@ async def scrape_job_details(
         if not email:
 
             print(
-                "🚫 EMAIL absent de "
-                "Informationen zur Bewerbung "
-                "→ OFFRE IGNORÉE"
+                "🚫 Aucun email dans "
+                "Informationen zur Bewerbung."
+            )
+
+            print(
+                "⏭️ OFFRE IGNORÉE"
             )
 
             return None
 
         job["email"] = email
 
+        print(
+            "📧 Email trouvé :",
+            email
+        )
+
         # ====================================================
         # TELEPHONE
         #
-        # uniquement dans la même section
+        # UNIQUEMENT dans Informationen zur Bewerbung
         # ====================================================
 
         phone = extract_phone(
@@ -708,6 +826,19 @@ async def scrape_job_details(
         )
 
         job["phone"] = phone
+
+        if phone:
+
+            print(
+                "☎️ Téléphone trouvé :",
+                phone
+            )
+
+        else:
+
+            print(
+                "☎️ Téléphone non trouvé."
+            )
 
         # ====================================================
         # ENTREPRISE
@@ -720,8 +851,7 @@ async def scrape_job_details(
         if not company:
 
             print(
-                "🚫 Entreprise non trouvée "
-                "→ OFFRE IGNORÉE"
+                "🚫 Entreprise non trouvée."
             )
 
             return None
@@ -741,14 +871,6 @@ async def scrape_job_details(
         # ====================================================
         # VALIDATION FINALE
         # ====================================================
-
-        if not job["email"]:
-
-            print(
-                "🚫 Validation échouée : email absent."
-            )
-
-            return None
 
         print()
         print(
@@ -811,15 +933,11 @@ async def process_jobs(
     new_jobs = []
 
     existing_urls = {
-
         normalize_url(
             job.get("url", "")
         )
-
         for job in database
-
         if job.get("url")
-
     }
 
     print()
@@ -829,7 +947,7 @@ async def process_jobs(
     )
 
     # ========================================================
-    # DEDUPLICATION
+    # DÉDUPLICATION
     # ========================================================
 
     unique_jobs = []
@@ -882,7 +1000,7 @@ async def process_jobs(
 
                 print(
                     f"⏭️ [{index}/{len(unique_jobs)}] "
-                    f"Déjà envoyée : "
+                    f"Déjà enregistrée : "
                     f"{job['title']}"
                 )
 
@@ -898,17 +1016,15 @@ async def process_jobs(
                 job
             )
 
-            # Offre refusée
             if result is None:
 
                 print(
                     "🚫 Offre non conforme "
-                    "→ pas de sauvegarde"
+                    "ou Sicherheitsabfrage non terminée."
                 )
 
                 continue
 
-            # Offre acceptée
             new_jobs.append(
                 result
             )
@@ -931,7 +1047,7 @@ async def process_jobs(
 
 
 # ============================================================
-# CREER EMAIL HTML
+# EMAIL HTML
 # ============================================================
 
 def create_email(jobs):
@@ -942,7 +1058,6 @@ def create_email(jobs):
 
     html = f"""
     <html>
-
     <body>
 
         <h2>
@@ -960,8 +1075,8 @@ def create_email(jobs):
         </p>
 
         <p>
-            Les emails ci-dessous proviennent
-            de la section
+            Les coordonnées email et téléphone
+            proviennent de la section
             <b>Informationen zur Bewerbung</b>.
         </p>
 
@@ -1032,7 +1147,6 @@ def create_email(jobs):
         )
 
         html += f"""
-
         <h3>
             {number}. {title}
         </h3>
@@ -1076,13 +1190,11 @@ def create_email(jobs):
         """
 
     html += """
-
         <p>
             🤖 Rapport automatique
         </p>
 
     </body>
-
     </html>
     """
 
@@ -1090,14 +1202,10 @@ def create_email(jobs):
 
 
 # ============================================================
-# ENVOYER EMAIL
+# ENVOI EMAIL
 # ============================================================
 
 def send_email(jobs):
-
-    # IMPORTANT :
-    # Aucun email n'est envoyé s'il n'y a
-    # aucune nouvelle offre valide.
 
     if not jobs:
 
@@ -1155,7 +1263,7 @@ def send_email(jobs):
 
 
 # ============================================================
-# PROGRAMME PRINCIPAL
+# MAIN
 # ============================================================
 
 async def main():
@@ -1168,15 +1276,16 @@ async def main():
     )
 
     print(
-        "🎯 FILTRE : EMAIL DANS "
+        "🎯 EMAIL OBLIGATOIRE DANS "
         "INFORMATIONEN ZUR BEWERBUNG"
     )
 
-    print("=" * 60)
+    print(
+        "🔐 SICHERHEITSABFRAGE : "
+        "ATTENTE, PAS D'ABANDON IMMÉDIAT"
+    )
 
-    # ========================================================
-    # DATABASE
-    # ========================================================
+    print("=" * 60)
 
     database = load_database()
 
@@ -1187,7 +1296,7 @@ async def main():
     )
 
     # ========================================================
-    # RECHERCHE
+    # OUVERTURE JOBSUCHE
     # ========================================================
 
     async with async_playwright() as playwright:
@@ -1215,7 +1324,7 @@ async def main():
             await browser.close()
 
     # ========================================================
-    # TRAITEMENT
+    # ANALYSE
     # ========================================================
 
     new_jobs = await process_jobs(
@@ -1231,6 +1340,11 @@ async def main():
         database
     )
 
+    print()
+    print(
+        "💾 data.json sauvegardé."
+    )
+
     # ========================================================
     # EMAIL
     # ========================================================
@@ -1240,7 +1354,7 @@ async def main():
     )
 
     # ========================================================
-    # RAPPORT FINAL
+    # RAPPORT
     # ========================================================
 
     print()
@@ -1252,12 +1366,12 @@ async def main():
     )
 
     print(
-        f"🆕 OFFRES ACCEPTÉES : "
+        f"🆕 NOUVELLES OFFRES ACCEPTÉES : "
         f"{len(new_jobs)}"
     )
 
     print(
-        f"📚 TOTAL BASE : "
+        f"📚 TOTAL DATABASE : "
         f"{len(database)}"
     )
 
